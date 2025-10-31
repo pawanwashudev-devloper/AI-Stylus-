@@ -1,7 +1,8 @@
-import React, { useState, useCallback, useMemo } from 'react';
-import { analyzeIdea, generateImage } from './services/geminiService';
+
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { analyzeIdea, generateImage, validateApiKey } from './services/geminiService';
 import { fileToBase64 } from './utils/fileUtils';
-import { UploadIcon, SparklesIcon, XIcon, ImagePlusIcon, WandIcon, DownloadIcon, CopyIcon } from './components/Icons';
+import { UploadIcon, SparklesIcon, XIcon, ImagePlusIcon, WandIcon, DownloadIcon, CopyIcon, KeyIcon, CheckCircleIcon } from './components/Icons';
 
 type AppState = 'IDLE' | 'GENERATING' | 'RESULT_READY' | 'ERROR';
 
@@ -45,6 +46,11 @@ const ImageUploader: React.FC<{
 );
 
 const App: React.FC = () => {
+    const [apiKey, setApiKey] = useState<string>('');
+    const [isKeyValid, setIsKeyValid] = useState<boolean>(false);
+    const [isKeyLoading, setIsKeyLoading] = useState<boolean>(false);
+    const [keyError, setKeyError] = useState<string>('');
+
     const [rawImage, setRawImage] = useState<string | null>(null);
     const [styleImage, setStyleImage] = useState<string | null>(null);
     const [userPrompt, setUserPrompt] = useState<string>('');
@@ -55,6 +61,43 @@ const App: React.FC = () => {
     const [appState, setAppState] = useState<AppState>('IDLE');
     const [showPrompt, setShowPrompt] = useState<boolean>(false);
     const [isCopied, setIsCopied] = useState<boolean>(false);
+
+    useEffect(() => {
+        const storedKey = localStorage.getItem('gemini-api-key');
+        if (storedKey) {
+            handleKeyValidation(storedKey, true);
+        }
+    }, []);
+
+    const handleKeyValidation = async (keyToValidate: string, isAuto: boolean = false) => {
+        if (!keyToValidate) {
+            setKeyError('Please enter an API key.');
+            return;
+        }
+        setIsKeyLoading(true);
+        setKeyError('');
+        setApiKey(keyToValidate);
+
+        const isValid = await validateApiKey(keyToValidate);
+        if (isValid) {
+            setIsKeyValid(true);
+            localStorage.setItem('gemini-api-key', keyToValidate);
+        } else {
+            setIsKeyValid(false);
+            if (!isAuto) {
+                setKeyError('The API key is invalid. Please check it and try again.');
+            }
+            localStorage.removeItem('gemini-api-key');
+        }
+        setIsKeyLoading(false);
+    };
+
+    const handleKeyChange = () => {
+        setIsKeyValid(false);
+        setApiKey('');
+        setKeyError('');
+        localStorage.removeItem('gemini-api-key');
+    };
 
     const handleFileChange = (setter: React.Dispatch<React.SetStateAction<string | null>>) => async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -70,6 +113,12 @@ const App: React.FC = () => {
     };
 
     const processGeneration = async (isEnhancement: boolean) => {
+        if (!isKeyValid) {
+            setError('Please provide and validate your Gemini API key to start.');
+            setAppState('ERROR');
+            return;
+        }
+
         if (!rawImage && !styleImage && !userPrompt) {
             setError('Please provide a raw image, a style image, or a text description to start.');
             setAppState('ERROR');
@@ -77,21 +126,19 @@ const App: React.FC = () => {
         }
         setError(null);
         setAppState('GENERATING');
-        setGeneratedImage(null); // Clear previous image
+        setGeneratedImage(null);
         
         try {
-            // Step 1: Analyze and create a master prompt
             const previousPrompt = isEnhancement ? generatedPrompt : undefined;
             const suggestion = isEnhancement ? editSuggestion : undefined;
             
-            const newPrompt = await analyzeIdea(rawImage, styleImage, userPrompt, previousPrompt, suggestion);
+            const newPrompt = await analyzeIdea(apiKey, rawImage, styleImage, userPrompt, previousPrompt, suggestion);
             setGeneratedPrompt(newPrompt);
 
-            // Step 2: Generate the image using the new prompt and raw image
-            const imageB64 = await generateImage(newPrompt, rawImage);
+            const imageB64 = await generateImage(apiKey, newPrompt, rawImage);
             setGeneratedImage(`data:image/png;base64,${imageB64}`);
             setAppState('RESULT_READY');
-            setEditSuggestion(''); // Clear suggestion after use
+            setEditSuggestion('');
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
             setError(`Failed during image creation: ${errorMessage}`);
@@ -122,7 +169,72 @@ const App: React.FC = () => {
         });
     };
 
-    const isGenerateDisabled = appState === 'GENERATING' || (!rawImage && !styleImage && !userPrompt);
+    const isGenerateDisabled = appState === 'GENERATING' || !isKeyValid || (!rawImage && !styleImage && !userPrompt);
+
+    const apiKeySection = useMemo(() => {
+        if (isKeyValid) {
+            return (
+                <div className="bg-gray-800 p-4 rounded-xl shadow-md border border-gray-700">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                            <CheckCircleIcon className="w-6 h-6 mr-3 text-green-400" />
+                            <p className="font-medium text-gray-200">API Key is set and validated.</p>
+                        </div>
+                        <button 
+                            onClick={handleKeyChange}
+                            className="text-sm text-indigo-400 hover:text-indigo-300 font-semibold"
+                        >
+                            Change Key
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        return (
+             <div className="bg-gray-800 p-4 rounded-xl shadow-md border border-gray-700">
+                <label htmlFor="api-key" className="flex items-center text-sm font-medium text-gray-300 mb-2">
+                    <KeyIcon className="w-5 h-5 mr-2 text-indigo-400" />
+                    Enter your Gemini API Key
+                </label>
+                <div className="flex items-center space-x-2">
+                    <input
+                        type="password"
+                        id="api-key"
+                        name="api-key"
+                        value={apiKey}
+                        onChange={(e) => {
+                            setApiKey(e.target.value);
+                            if (keyError) setKeyError('');
+                        }}
+                        className="block w-full bg-gray-900 border-gray-600 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm text-gray-100 placeholder-gray-500"
+                        placeholder="Paste your API key here"
+                        aria-required="true"
+                        disabled={isKeyLoading}
+                        onKeyDown={(e) => e.key === 'Enter' && handleKeyValidation(apiKey)}
+                    />
+                    <button 
+                        onClick={() => handleKeyValidation(apiKey)}
+                        disabled={!apiKey || isKeyLoading}
+                        className="px-4 py-2 flex-shrink-0 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-indigo-500 disabled:bg-gray-500 disabled:cursor-not-allowed"
+                    >
+                        {isKeyLoading ? (
+                            <div className="w-5 h-5 border-2 border-t-transparent border-white rounded-full animate-spin"></div>
+                        ) : 'Save'}
+                    </button>
+                </div>
+                {keyError && <p className="mt-2 text-sm text-red-400">{keyError}</p>}
+                {!keyError && (
+                    <p className="mt-2 text-xs text-gray-500">
+                        Get your key from{' '}
+                        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline">
+                            Google AI Studio
+                        </a>. Your key is stored locally in your browser.
+                    </p>
+                )}
+            </div>
+        );
+    }, [apiKey, isKeyValid, isKeyLoading, keyError]);
 
     const inputPanelContent = useMemo(() => (
         <div className="flex flex-col space-y-6">
@@ -196,7 +308,7 @@ const App: React.FC = () => {
                  <div className="flex flex-col items-center justify-center h-full text-center p-8 bg-gray-800/50 rounded-lg">
                     <ImagePlusIcon className="w-16 h-16 text-gray-600" />
                     <h3 className="mt-2 text-lg font-medium text-gray-300">Your results will appear here</h3>
-                    <p className="mt-1 text-sm text-gray-500">Provide images or a description to get started.</p>
+                    <p className="mt-1 text-sm text-gray-500">Provide an API Key and images or a description to get started.</p>
                 </div>
              );
         }
@@ -242,7 +354,7 @@ const App: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={handleEnhance}
-                                disabled={!editSuggestion || appState === 'GENERATING'}
+                                disabled={appState === 'GENERATING' || !editSuggestion}
                                 className="px-4 py-2 flex items-center border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-500 disabled:cursor-not-allowed"
                             >
                                 <WandIcon className="w-5 h-5 mr-1" />
@@ -276,6 +388,11 @@ const App: React.FC = () => {
                         Transform your concepts into stunning visuals. Provide images, describe your goal, and enhance your creation iteratively.
                     </p>
                 </header>
+
+                <div className="max-w-2xl mx-auto mb-8">
+                    {apiKeySection}
+                </div>
+
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
                     <div className="bg-gray-800 p-6 md:p-8 rounded-xl shadow-2xl border border-gray-700">
                        {inputPanelContent}
