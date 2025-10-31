@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Modality } from "@google/genai";
 
 const getMimeTypeAndData = (base64: string) => {
@@ -10,7 +9,13 @@ const getMimeTypeAndData = (base64: string) => {
 const handleApiError = (error: unknown): never => {
     if (error instanceof Error) {
         const message = error.message.toLowerCase();
-        // Check for specific keywords that indicate a quota/billing issue.
+        
+        // General check for API key issues (invalid, not set, etc.)
+        if (message.includes('api key')) {
+             throw new Error('Invalid or missing API Key. Please check your key and try again.');
+        }
+
+        // Check for quota/billing issues
         if (
             message.includes('quota') || 
             message.includes('resource_exhausted') ||
@@ -20,14 +25,12 @@ const handleApiError = (error: unknown): never => {
                 'API Quota Exceeded or Billing not enabled. Please ensure the Google Cloud project for your API key has billing enabled. For more info, see: ai.google.dev/gemini-api/docs/billing'
             );
         }
-        if (message.includes('api key not valid')) {
-            throw new Error('Invalid API Key. Please check your key and try again.');
-        }
-        // Re-throw original error if it's not a known issue
+        
+        // Re-throw original error if it's not a known, user-actionable issue
         throw error;
     }
     // Throw a generic error for non-Error types
-    throw new Error('An unknown error occurred.');
+    throw new Error('An unknown error occurred during the API request.');
 };
 
 /**
@@ -41,6 +44,7 @@ export const validateApiKey = async (apiKey: string): Promise<boolean> => {
     }
     try {
         const ai = new GoogleGenAI({ apiKey });
+        // Use a simple and fast model for validation.
         const model = 'gemini-2.5-flash';
         await ai.models.generateContent({
             model: model,
@@ -48,6 +52,7 @@ export const validateApiKey = async (apiKey: string): Promise<boolean> => {
         });
         return true;
     } catch (error) {
+        // Log the actual error for debugging but return a simple false to the UI
         console.error('API Key validation failed:', error);
         return false;
     }
@@ -73,6 +78,9 @@ export const analyzeIdea = async (
     previousPrompt?: string,
     editSuggestion?: string
 ): Promise<string> => {
+    if (!apiKey) {
+        throw new Error("API key is missing. Please validate your API key before generating.");
+    }
     try {
         const ai = new GoogleGenAI({ apiKey });
         const model = 'gemini-2.5-pro';
@@ -139,6 +147,9 @@ You are now refining a previous attempt.
  * @returns A base64 encoded string of the generated PNG image.
  */
 export const generateImage = async (apiKey: string, prompt: string, rawImageBase64: string | null): Promise<string> => {
+    if (!apiKey) {
+        throw new Error("API key is missing. Please validate your API key before generating.");
+    }
     try {
         const ai = new GoogleGenAI({ apiKey });
         const model = 'gemini-2.5-flash-image';
