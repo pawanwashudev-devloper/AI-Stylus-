@@ -1,0 +1,5 @@
+{
+  "name": "Stylus AI",
+  "description": "An application that analyzes user-provided images and text to generate creative prompts, which are then used to create new, AI-generated images or edits.",
+  "requestFramePermissions": []
+}
