@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { analyzeIdea, generateImage, validateApiKey } from './services/geminiService';
 import { fileToBase64 } from './utils/fileUtils';
@@ -64,19 +63,20 @@ const App: React.FC = () => {
 
     useEffect(() => {
         const storedKey = localStorage.getItem('gemini-api-key');
-        if (storedKey) {
-            handleKeyValidation(storedKey, true);
+        // Pre-fill from local storage, but require user to validate manually.
+        // This prevents crashes on load if the stored key is invalid or corrupted.
+        if (storedKey && storedKey !== 'null' && storedKey !== 'undefined') {
+            setApiKey(storedKey);
         }
     }, []);
 
-    const handleKeyValidation = async (keyToValidate: string, isAuto: boolean = false) => {
+    const handleKeyValidation = async (keyToValidate: string) => {
         if (!keyToValidate) {
             setKeyError('Please enter an API key.');
             return;
         }
         setIsKeyLoading(true);
         setKeyError('');
-        setApiKey(keyToValidate);
 
         const isValid = await validateApiKey(keyToValidate);
         if (isValid) {
@@ -84,9 +84,7 @@ const App: React.FC = () => {
             localStorage.setItem('gemini-api-key', keyToValidate);
         } else {
             setIsKeyValid(false);
-            if (!isAuto) {
-                setKeyError('The API key is invalid. Please check it and try again.');
-            }
+            setKeyError('The API key is invalid. Please check it and try again.');
             localStorage.removeItem('gemini-api-key');
         }
         setIsKeyLoading(false);
