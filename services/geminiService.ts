@@ -1,6 +1,4 @@
-import { GoogleGenAI, Modality } from "@google/genai";
-
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+// Updated geminiService.ts to use serverless proxy instead of direct API calls
 
 const getMimeTypeAndData = (base64: string) => {
     const [meta, data] = base64.split(',');
@@ -28,7 +26,6 @@ export const analyzeIdea = async (
     const model = 'gemini-2.5-pro';
     
     let systemInstruction = `You are a master prompt creator for an AI image generator. Your task is to synthesize user inputs into a single, detailed, and evocative prompt. The user might write in simple or imperfect English; your goal is to understand their core intent.
-
 **Rules:**
 1.  **Analyze all inputs:** Consider the raw image (the subject), the style image (the aesthetic reference), and the user's text prompt (if provided).
 2.  **If no text is provided:** Infer the goal from the combination of the raw and style images. For example, if the raw image is a person and the style image is a watercolor painting, the goal is likely to render the person in a watercolor style.
@@ -65,18 +62,30 @@ You are now refining a previous attempt.
 
     parts.push({ text: textContent });
 
-    const response = await ai.models.generateContent({
-        model: model,
-        contents: { parts: parts },
-        config: {
-            systemInstruction: systemInstruction,
-            temperature: 0.8,
-        }
+    // Send request to the proxy endpoint instead of calling Gemini API directly
+    const response = await fetch('/api/gemini-proxy', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            action: 'analyzeIdea',
+            model: model,
+            contents: { parts: parts },
+            config: {
+                systemInstruction: systemInstruction,
+                temperature: 0.8,
+            }
+        })
     });
 
-    return response.text.trim();
-};
+    if (!response.ok) {
+        throw new Error(`API request failed: ${response.statusText}`);
+    }
 
+    const result = await response.json();
+    return result.text;
+};
 
 /**
  * Generates an image based on a prompt, optionally using a raw image for editing.
@@ -88,7 +97,6 @@ export const generateImage = async (prompt: string, rawImageBase64: string | nul
     const model = 'gemini-2.5-flash-image';
     
     const parts: any[] = [{ text: prompt }];
-
     if (rawImageBase64) {
         const { mimeType, data } = getMimeTypeAndData(rawImageBase64);
         // For image generation, the image part should usually come first.
@@ -97,20 +105,32 @@ export const generateImage = async (prompt: string, rawImageBase64: string | nul
         });
     }
 
-    const response = await ai.models.generateContent({
-        model: model,
-        contents: { parts: parts },
-        config: {
-            responseModalities: [Modality.IMAGE],
-            numberOfImages: 1, // Explicitly request one image
+    // Send request to the proxy endpoint instead of calling Gemini API directly
+    const response = await fetch('/api/gemini-proxy', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+            action: 'generateImage',
+            model: model,
+            contents: { parts: parts },
+            config: {
+                responseModalities: ['IMAGE'],
+                numberOfImages: 1,
+            }
+        })
     });
 
-    for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData && part.inlineData.mimeType.startsWith('image/')) {
-            return part.inlineData.data;
-        }
+    if (!response.ok) {
+        throw new Error(`API request failed: ${response.statusText}`);
     }
 
-    throw new Error("No image data found in the AI's response.");
+    const result = await response.json();
+    
+    if (!result.imageData) {
+        throw new Error("No image data found in the API response.");
+    }
+    
+    return result.imageData;
 };
